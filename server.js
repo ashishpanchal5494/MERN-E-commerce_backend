@@ -21,6 +21,7 @@ const morgan = require("morgan");
 const PORT = process.env.PORT || 8000;
 
 app.use(morgan("dev"));
+// app.use(cors());
 app.use(
   cors({
     origin: "https://zesty-quokka-dd494d.netlify.app",

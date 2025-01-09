@@ -9,6 +9,7 @@ const validateMongoDbId = require("../utils/validateMongodbId");
 const jwt = require("jsonwebtoken");
 const sendEmail = require("../controller/emailControll");
 const crypto = require("crypto");
+const bcrypt = require("bcrypt");
 // Create a User ----------------------------------------------
 
 const createUser = asyncHandler(async (req, res) => {
@@ -70,52 +71,70 @@ const loginUserCtrl = asyncHandler(async (req, res) => {
 
 const loginAdmin = asyncHandler(async (req, res) => {
   const { email, password } = req.body;
-  // check if user exists or not
+
   const findAdmin = await User.findOne({ email });
-  if (findAdmin.role !== "admin") throw new Error("Not Authorised");
-  if (findAdmin && (await findAdmin.isPasswordMatched(password))) {
-    const refreshToken = await generateRefreshToken(findAdmin?._id);
-    const updateuser = await User.findByIdAndUpdate(
+  if (!findAdmin || findAdmin.role !== "admin") {
+    res.status(403).json({ message: "Not Authorized" });
+    return;
+  }
+
+  if (await findAdmin.isPasswordMatched(password)) {
+    const refreshToken = generateRefreshToken(findAdmin._id);
+
+    // Store hashed refresh token
+    const hashedRefreshToken = bcrypt.hashSync(refreshToken, 10);
+    await User.findByIdAndUpdate(
       findAdmin.id,
-      {
-        refreshToken: refreshToken,
-      },
+      { refreshToken: hashedRefreshToken },
       { new: true }
     );
+
     res.cookie("refreshToken", refreshToken, {
       httpOnly: true,
-      maxAge: 72 * 60 * 60 * 1000,
+      secure: true,
+      sameSite: "strict",
+      maxAge: 72 * 60 * 60 * 1000, // 3 days
     });
+
     res.json({
-      _id: findAdmin?._id,
-      firstname: findAdmin?.firstname,
-      lastname: findAdmin?.lastname,
-      email: findAdmin?.email,
-      mobile: findAdmin?.mobile,
-      token: generateToken(findAdmin?._id),
+      _id: findAdmin._id,
+      firstname: findAdmin.firstname,
+      lastname: findAdmin.lastname,
+      email: findAdmin.email,
+      mobile: findAdmin.mobile,
+      token: generateToken(findAdmin._id), // Short-lived access token
     });
   } else {
-    throw new Error("Invalid Credentials");
+    res.status(401).json({ message: "Invalid Credentials" });
   }
 });
 
 // handle refresh token
 
 const handleRefreshToken = asyncHandler(async (req, res) => {
-  const cookie = req.cookies;
-  if (!cookie?.refreshToken) throw new Error("No Refresh Token in Cookies");
-  const refreshToken = cookie.refreshToken;
-  const user = await User.findOne({ refreshToken });
-  if (!user) throw new Error(" No Refresh token present in db or not matched");
+  const { refreshToken } = req.cookies;
+
+  if (!refreshToken) {
+    res.status(400).json({ message: "No Refresh Token in Cookies" });
+    return;
+  }
+
+  const user = await User.findOne({});
+  if (!user || !bcrypt.compareSync(refreshToken, user.refreshToken)) {
+    res.status(401).json({ message: "Invalid Refresh Token" });
+    return;
+  }
+
   jwt.verify(refreshToken, process.env.JWT_SECRET, (err, decoded) => {
-    if (err || user.id !== decoded.id) {
-      throw new Error("There is something wrong with refresh token");
+    if (err || user._id.toString() !== decoded.id) {
+      res.status(403).json({ message: "Invalid Refresh Token" });
+      return;
     }
-    const accessToken = generateToken(user?._id);
-    res.json({ accessToken });
+
+    const newAccessToken = generateToken(user._id);
+    res.json({ accessToken: newAccessToken });
   });
 });
-
 // get user wishlist
 const getWishlist = asyncHandler(async (req, res) => {
   const { _id } = req.user;
