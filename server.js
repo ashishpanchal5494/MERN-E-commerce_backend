@@ -21,7 +21,13 @@ const morgan = require("morgan");
 const PORT = process.env.PORT || 8000;
 
 app.use(morgan("dev"));
-app.use(cors());
+app.use(
+  cors({
+    origin: "https://zesty-quokka-dd494d.netlify.app",
+    methods: ["GET", "POST", "PUT", "DELETE"], // Adjust based on your API methods
+    credentials: true, // If you're sending cookies or HTTP auth
+  })
+);
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(cookieParser());
